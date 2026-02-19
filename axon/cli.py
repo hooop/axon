@@ -17,7 +17,7 @@ from PIL import Image
 
 from axon.generator import generate_image
 from axon.logo import animate_logo, render_logo
-from axon.renderer import render_image, render_preview
+from axon.renderer import load_lut, render_image, render_preview
 from axon.terminal import get_terminal_width
 
 
@@ -66,6 +66,25 @@ _DITHERS = [
     ("Grain", "floyd"),
     ("Grid", "ordered"),
 ]
+
+
+def _scan_palettes():
+    """Scan palettes/ folder for LUT PNG files.
+
+    Returns list of (name, remap_or_none). First entry is always ("None", None).
+    """
+    palettes = [("None", None)]
+    lut_dir = Path(__file__).resolve().parent.parent / "palettes"
+    if not lut_dir.is_dir():
+        return palettes
+    for png in sorted(lut_dir.glob("*.png")):
+        try:
+            remap = load_lut(str(png))
+            name = png.stem.capitalize()
+            palettes.append((name, remap))
+        except Exception:
+            continue
+    return palettes
 
 
 def _read_key():
@@ -170,12 +189,15 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     image_bytes = generate_image(prompt, width=size, height=size)
     image = Image.open(io.BytesIO(image_bytes))
 
-    # Settings state: [filter_index, dither_index]
-    selected = [0, 0]
-    active_row = 0  # 0=Filter, 1=Dither
+    palettes = _scan_palettes()
+
+    # Settings state: [filter_index, dither_index, palette_index]
+    selected = [0, 0, 0]
+    active_row = 0
     settings = [
         ("Filter", _FILTERS),
         ("Texture", _DITHERS),
+        ("Palette", palettes),
     ]
 
     img_lines = _image_height(columns, pola, caption)
@@ -210,11 +232,16 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         _, dither = _DITHERS[selected[1]]
         return dither
 
+    def _current_remap():
+        _, remap = palettes[selected[2]]
+        return remap
+
     def _draw_all():
         """Draw image + blank + menu. Cursor ends on last menu line."""
         sys.stdout.write("\n")
         rendered = render_image(image, columns, border=pola, caption=caption,
-                                resample=_current_resample(), dither=_current_dither())
+                                resample=_current_resample(), dither=_current_dither(),
+                                remap=_current_remap())
         sys.stdout.write(rendered)
         sys.stdout.write(f"\n\n{_menu_str()}")
         sys.stdout.flush()
@@ -273,16 +300,19 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     # Replace menu with confirmed choices
     filter_name, _ = _FILTERS[selected[0]]
     dither_name, _ = _DITHERS[selected[1]]
+    palette_name, _ = palettes[selected[2]]
     sys.stdout.write(f"\033[{menu_lines}A")
     for i in range(menu_lines):
         sys.stdout.write(f"\033[2K\n")
     sys.stdout.write(f"\033[{menu_lines}A")
     sys.stdout.write(f"  {dim}Filter:{reset} {filter_name}\n")
     sys.stdout.write(f"  {dim}Texture:{reset} {dither_name}\n")
+    sys.stdout.write(f"  {dim}Palette:{reset} {palette_name}\n")
     sys.stdout.flush()
 
     final_resample = _current_resample()
     final_dither = _current_dither()
+    final_remap = _current_remap()
     gallery = Path.home() / "axon_gallery"
     gallery.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -296,7 +326,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         print(f"  {dim}Original:{reset} {png_path}")
 
         # Save scaled-up 256-color preview
-        preview = render_preview(image, columns, scale=8, resample=final_resample, dither=final_dither)
+        preview = render_preview(image, columns, scale=8, resample=final_resample, dither=final_dither, remap=final_remap)
         preview_path = gallery / f"axon_{timestamp}_256.png"
         preview.save(preview_path)
         print(f"  {dim}Preview:{reset}  {preview_path}")
@@ -305,7 +335,8 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     do_export = _yes_no_menu("Export JSON", default=1)
     if do_export:
         rendered = render_image(image, columns, border=pola, caption=caption,
-                                resample=final_resample, dither=final_dither)
+                                resample=final_resample, dither=final_dither,
+                                remap=final_remap)
         lines = rendered.split("\n")
         json_data = {
             "width": columns,

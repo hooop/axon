@@ -1,5 +1,8 @@
 """Convert a PIL Image to a half-block ANSI string for terminal display (256 colors)."""
 
+from pathlib import Path
+from typing import Optional
+
 from PIL import Image
 
 # The 6x6x6 color cube in the 256-color palette starts at index 16.
@@ -46,6 +49,34 @@ def _rgb_to_256(r: int, g: int, b: int) -> int:
     return cube_index
 
 
+def load_lut(path: str) -> list:
+    """Load a palette LUT from a PNG file (16x16 grid, 32x32 swatches).
+
+    Returns a remap table of 256 entries: remap[original_index] = new_index.
+    """
+    img = Image.open(path).convert("RGB")
+    pixels = img.load()
+    w, h = img.size
+    swatch_w = w // 16
+    swatch_h = h // 16
+    cx = swatch_w // 2
+    cy = swatch_h // 2
+
+    remap = [0] * 256
+    for idx in range(256):
+        row, col = idx // 16, idx % 16
+        r, g, b = pixels[col * swatch_w + cx, row * swatch_h + cy]
+        remap[idx] = _rgb_to_256(r, g, b)
+    return remap
+
+
+def _apply_remap(idx_grid, remap):
+    """Apply a 256→256 remap table to an index grid in place."""
+    for y in range(len(idx_grid)):
+        for x in range(len(idx_grid[0])):
+            idx_grid[y][x] = remap[idx_grid[y][x]]
+
+
 # Bayer 4x4 threshold matrix, normalized to [-0.5, 0.5) range
 _BAYER_4x4 = [
     [ 0/16 - 0.5,  8/16 - 0.5,  2/16 - 0.5, 10/16 - 0.5],
@@ -55,10 +86,11 @@ _BAYER_4x4 = [
 ]
 
 
-def _build_idx_grid(img: Image.Image, dither: str = "none"):
+def _build_idx_grid(img: Image.Image, dither: str = "none", remap: Optional[list] = None):
     """Build a 2D grid of ANSI 256 color indices from a PIL RGB image.
 
     dither: "none", "floyd" (Floyd-Steinberg), or "ordered" (Bayer 4x4).
+    remap: optional 256-entry remap table (from load_lut).
     Returns list[list[int]] of shape [height][width].
     """
     w, h = img.size
@@ -98,7 +130,6 @@ def _build_idx_grid(img: Image.Image, dither: str = "none"):
                         buf[y+1][x+1] = (buf[y+1][x+1][0] + er*1/16,
                                          buf[y+1][x+1][1] + eg*1/16,
                                          buf[y+1][x+1][2] + eb*1/16)
-        return grid
 
     elif dither == "ordered":
         spread = 32  # amplitude of the Bayer offset
@@ -111,17 +142,19 @@ def _build_idx_grid(img: Image.Image, dither: str = "none"):
                 cg = max(0, min(255, round(g + offset)))
                 cb = max(0, min(255, round(b + offset)))
                 grid[y][x] = _rgb_to_256(cr, cg, cb)
-        return grid
 
     else:  # "none"
         grid = [[0] * w for _ in range(h)]
         for y in range(h):
             for x in range(w):
                 grid[y][x] = _rgb_to_256(*pixels[x, y])
-        return grid
+
+    if remap:
+        _apply_remap(grid, remap)
+    return grid
 
 
-def render_image(image: Image.Image, columns: int, border: bool = False, caption: str = None, resample=Image.LANCZOS, dither: str = "none") -> str:
+def render_image(image: Image.Image, columns: int, border: bool = False, caption: str = None, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None) -> str:
     """Render an image as 256-color ANSI text using Unicode half-block characters.
 
     Each character cell encodes two vertical pixels:
@@ -139,7 +172,7 @@ def render_image(image: Image.Image, columns: int, border: bool = False, caption
     if rows % 2 != 0:
         rows += 1
     img = image.convert("RGB").resize((inner, rows), resample)
-    idx_grid = _build_idx_grid(img, dither)
+    idx_grid = _build_idx_grid(img, dither, remap)
 
     white = "\033[48;5;231m"
     reset = "\033[0m"
@@ -188,7 +221,7 @@ def _idx_to_rgb(idx: int):
     return _CUBE_VALUES[i // 36], _CUBE_VALUES[(i % 36) // 6], _CUBE_VALUES[i % 6]
 
 
-def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Image.LANCZOS, dither: str = "none") -> Image.Image:
+def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None) -> Image.Image:
     """Render a scaled-up preview showing the exact 256-color terminal output.
 
     Returns a PIL Image where each terminal pixel is a (scale x scale) block.
@@ -197,7 +230,7 @@ def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Im
     if rows % 2 != 0:
         rows += 1
     img = image.convert("RGB").resize((columns, rows), resample)
-    idx_grid = _build_idx_grid(img, dither)
+    idx_grid = _build_idx_grid(img, dither, remap)
 
     preview = Image.new("RGB", (columns * scale, rows * scale))
     preview_pixels = preview.load()

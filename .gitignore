@@ -4,3 +4,5 @@ __pycache__/
 .DS_Store
 axon/256_colors.py
 axon/ansi256.png
+axon_palette_256.png
+*.act
