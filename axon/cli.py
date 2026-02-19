@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore")
 
 import argparse
 import io
+import json
 import sys
 import termios
 import tty
@@ -165,18 +166,76 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         sys.stdout.write("\033[?25h\n")
         sys.stdout.flush()
 
-    # Clear menu line
+    # Clear filter menu line
     sys.stdout.write(f"\033[1A\033[2K\r")
     sys.stdout.flush()
 
-    # Save
+    # Export JSON menu
+    _, final_resample = _FILTERS[selected]
+    export_options = ["Yes", "No"]
+    export_selected = 1  # default No
+    white = "\033[38;5;231m"
+
+    def _export_menu_str():
+        parts = []
+        for i, name in enumerate(export_options):
+            if i == export_selected:
+                parts.append(f"{light_brown}>{white} {name}{reset}")
+            else:
+                parts.append(f"  {dim}{name}{reset}")
+        return f"  {light_brown}Export JSON:{reset}  " + "  ".join(parts)
+
+    sys.stdout.write("\033[?25l")
+    sys.stdout.write(_export_menu_str())
+    sys.stdout.flush()
+
+    try:
+        while True:
+            key = _read_key()
+
+            if key in ("quit", "enter"):
+                break
+
+            prev = export_selected
+            if key == "left" and export_selected > 0:
+                export_selected -= 1
+            elif key == "right" and export_selected < 1:
+                export_selected += 1
+
+            if export_selected != prev:
+                sys.stdout.write(f"\r\033[2K{_export_menu_str()}")
+                sys.stdout.flush()
+    finally:
+        sys.stdout.write("\033[?25h\n")
+        sys.stdout.flush()
+
+    # Clear export menu line
+    sys.stdout.write(f"\033[1A\033[2K\r")
+    sys.stdout.flush()
+
+    # Save PNG
     gallery = Path.home() / "axon_gallery"
     gallery.mkdir(exist_ok=True)
-    filename = f"axon_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.png"
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+    filename = f"axon_{timestamp}.png"
     filepath = gallery / filename
     filepath.write_bytes(image_bytes)
 
     print(f"  {dim}Saved:{reset} {filepath}")
+
+    # Export JSON if selected
+    if export_selected == 0:
+        rendered = render_image(image, columns, border=pola, caption=caption, resample=final_resample)
+        lines = rendered.split("\n")
+        json_data = {
+            "width": columns,
+            "height": len(lines),
+            "lines": lines,
+        }
+        json_path = gallery / f"axon_{timestamp}.json"
+        json_path.write_text(json.dumps(json_data, ensure_ascii=False))
+        print(f"  {dim}Export:{reset} {json_path}")
+
     print()
 
 
