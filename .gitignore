@@ -1,0 +1,6 @@
+__pycache__/
+*.egg-info/
+*.pyc
+.DS_Store
+axon/256_colors.py
+axon/ansi256.png
