@@ -102,3 +102,37 @@ def render_image(image: Image.Image, columns: int, border: bool = False, caption
                 lines.append(white + border_char * columns + reset)
 
     return "\n".join(lines)
+
+
+def _idx_to_rgb(idx: int):
+    """Convert an ANSI 256 index back to RGB."""
+    if idx >= 232:
+        gv = _GRAY_VALUES[idx - 232]
+        return gv, gv, gv
+    i = idx - 16
+    return _CUBE_VALUES[i // 36], _CUBE_VALUES[(i % 36) // 6], _CUBE_VALUES[i % 6]
+
+
+def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Image.LANCZOS) -> Image.Image:
+    """Render a scaled-up preview showing the exact 256-color terminal output.
+
+    Returns a PIL Image where each terminal pixel is a (scale x scale) block.
+    """
+    rows = columns
+    if rows % 2 != 0:
+        rows += 1
+    img = image.convert("RGB").resize((columns, rows), resample)
+    pixels = img.load()
+
+    preview = Image.new("RGB", (columns * scale, rows * scale))
+    preview_pixels = preview.load()
+
+    for y in range(rows):
+        for x in range(columns):
+            idx = _rgb_to_256(*pixels[x, y])
+            r, g, b = _idx_to_rgb(idx)
+            for dy in range(scale):
+                for dx in range(scale):
+                    preview_pixels[x * scale + dx, y * scale + dy] = (r, g, b)
+
+    return preview

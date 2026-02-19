@@ -17,7 +17,7 @@ from PIL import Image
 
 from axon.generator import generate_image
 from axon.logo import animate_logo, render_logo
-from axon.renderer import render_image
+from axon.renderer import render_image, render_preview
 from axon.terminal import get_terminal_width
 
 
@@ -106,6 +106,53 @@ def _image_height(columns: int, border: bool, caption: Optional[str]) -> int:
     return lines
 
 
+def _yes_no_menu(label: str, default: int = 1) -> bool:
+    """Show a horizontal Yes/No menu. Returns True if Yes selected."""
+    dim = "\033[38;5;238m"
+    light_brown = "\033[38;5;137m"
+    white = "\033[38;5;231m"
+    reset = "\033[0m"
+    sel = default  # 0=Yes, 1=No
+
+    def _draw():
+        options = ["Yes", "No"]
+        parts = []
+        for i, name in enumerate(options):
+            if i == sel:
+                parts.append(f"{light_brown}>{white} {name}{reset}")
+            else:
+                parts.append(f"  {dim}{name}{reset}")
+        return f"  {light_brown}{label}:{reset}  " + "  ".join(parts)
+
+    sys.stdout.write("\033[?25l")
+    sys.stdout.write(_draw())
+    sys.stdout.flush()
+
+    try:
+        while True:
+            key = _read_key()
+            if key in ("quit", "enter"):
+                break
+            prev = sel
+            if key == "left" and sel > 0:
+                sel -= 1
+            elif key == "right" and sel < 1:
+                sel += 1
+            if sel != prev:
+                sys.stdout.write(f"\r\033[2K{_draw()}")
+                sys.stdout.flush()
+    finally:
+        sys.stdout.write("\033[?25h\n")
+        sys.stdout.flush()
+
+    # Clear menu line and show confirmed choice
+    confirmed = "yes" if sel == 0 else "no"
+    sys.stdout.write(f"\033[1A\033[2K  {dim}{label}:{reset}  {confirmed}\n")
+    sys.stdout.flush()
+
+    return sel == 0
+
+
 def _generate_and_display(prompt: str, columns: int, size: int,
                           pola: bool, caption: Optional[str]) -> None:
     """Generate an image and display it in the terminal."""
@@ -166,65 +213,33 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         sys.stdout.write("\033[?25h\n")
         sys.stdout.flush()
 
-    # Clear filter menu line
-    sys.stdout.write(f"\033[1A\033[2K\r")
+    # Replace filter menu with confirmed choice
+    filter_name, _ = _FILTERS[selected]
+    sys.stdout.write(f"\033[1A\033[2K  {dim}Filter:{reset} {filter_name}\n")
     sys.stdout.flush()
 
-    # Export JSON menu
     _, final_resample = _FILTERS[selected]
-    export_options = ["Yes", "No"]
-    export_selected = 1  # default No
-    white = "\033[38;5;231m"
-
-    def _export_menu_str():
-        parts = []
-        for i, name in enumerate(export_options):
-            if i == export_selected:
-                parts.append(f"{light_brown}>{white} {name}{reset}")
-            else:
-                parts.append(f"  {dim}{name}{reset}")
-        return f"  {light_brown}Export JSON:{reset}  " + "  ".join(parts)
-
-    sys.stdout.write("\033[?25l")
-    sys.stdout.write(_export_menu_str())
-    sys.stdout.flush()
-
-    try:
-        while True:
-            key = _read_key()
-
-            if key in ("quit", "enter"):
-                break
-
-            prev = export_selected
-            if key == "left" and export_selected > 0:
-                export_selected -= 1
-            elif key == "right" and export_selected < 1:
-                export_selected += 1
-
-            if export_selected != prev:
-                sys.stdout.write(f"\r\033[2K{_export_menu_str()}")
-                sys.stdout.flush()
-    finally:
-        sys.stdout.write("\033[?25h\n")
-        sys.stdout.flush()
-
-    # Clear export menu line
-    sys.stdout.write(f"\033[1A\033[2K\r")
-    sys.stdout.flush()
-
-    # Save PNG
     gallery = Path.home() / "axon_gallery"
     gallery.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    filename = f"axon_{timestamp}.png"
-    filepath = gallery / filename
-    filepath.write_bytes(image_bytes)
 
-    print(f"  {dim}Saved:{reset} {filepath}")
+    # Save menu
+    do_save = _yes_no_menu("Save", default=0)
+    if do_save:
+        # Save original Gemini image
+        png_path = gallery / f"axon_{timestamp}.png"
+        png_path.write_bytes(image_bytes)
+        print(f"  {dim}Original:{reset} {png_path}")
 
-    # Export JSON if selected
-    if export_selected == 0:
+        # Save scaled-up 256-color preview
+        preview = render_preview(image, columns, scale=8, resample=final_resample)
+        preview_path = gallery / f"axon_{timestamp}_256.png"
+        preview.save(preview_path)
+        print(f"  {dim}Preview:{reset}  {preview_path}")
+
+    # Export JSON menu
+    do_export = _yes_no_menu("Export JSON", default=1)
+    if do_export:
         rendered = render_image(image, columns, border=pola, caption=caption, resample=final_resample)
         lines = rendered.split("\n")
         json_data = {
@@ -234,7 +249,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         }
         json_path = gallery / f"axon_{timestamp}.json"
         json_path.write_text(json.dumps(json_data, ensure_ascii=False))
-        print(f"  {dim}Export:{reset} {json_path}")
+        print(f"  {dim}Export:{reset}   {json_path}")
 
     print()
 
