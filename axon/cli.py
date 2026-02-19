@@ -61,6 +61,12 @@ _FILTERS = [
     ("Raw", Image.NEAREST),
 ]
 
+_DITHERS = [
+    ("Clean", "none"),
+    ("Grain", "floyd"),
+    ("Grid", "ordered"),
+]
+
 
 def _read_key():
     """Read a single keypress (handles arrow keys)."""
@@ -158,33 +164,78 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     """Generate an image and display it in the terminal."""
     dim = "\033[38;5;238m"
     light_brown = "\033[38;5;137m"
+    white = "\033[38;5;231m"
     reset = "\033[0m"
 
     image_bytes = generate_image(prompt, width=size, height=size)
     image = Image.open(io.BytesIO(image_bytes))
 
-    selected = 0
+    # Settings state: [filter_index, dither_index]
+    selected = [0, 0]
+    active_row = 0  # 0=Filter, 1=Dither
+    settings = [
+        ("Filter", _FILTERS),
+        ("Texture", _DITHERS),
+    ]
+
     img_lines = _image_height(columns, pola, caption)
-    # total = blank line + image + blank line + menu line
-    total_lines = 1 + img_lines + 1 + 1
+    # total = blank line + image + blank line + 2 menu lines
+    menu_lines = len(settings)
+    total_lines = 1 + img_lines + 1 + menu_lines
 
     def _menu_str():
-        white = "\033[38;5;231m"
-        parts = []
-        for i, (name, _) in enumerate(_FILTERS):
-            if i == selected:
-                parts.append(f"{light_brown}>{white} {name}{reset}")
+        lines = []
+        for row, (label, options) in enumerate(settings):
+            active = row == active_row
+            parts = []
+            for i, (name, _) in enumerate(options):
+                if i == selected[row]:
+                    if active:
+                        parts.append(f"{light_brown}>{white} {name}{reset}")
+                    else:
+                        parts.append(f"{dim}> {name}{reset}")
+                else:
+                    parts.append(f"  {dim}{name}{reset}")
+            if active:
+                lines.append(f"  {light_brown}{label}:{reset}  " + "  ".join(parts))
             else:
-                parts.append(f"  {dim}{name}{reset}")
-        return "  " + "  ".join(parts)
+                lines.append(f"  {dim}{label}:{reset}  " + "  ".join(parts))
+        return "\n".join(lines)
+
+    def _current_resample():
+        _, resample = _FILTERS[selected[0]]
+        return resample
+
+    def _current_dither():
+        _, dither = _DITHERS[selected[1]]
+        return dither
 
     def _draw_all():
-        """Draw image + blank + menu. Cursor ends on menu line."""
-        _, resample = _FILTERS[selected]
+        """Draw image + blank + menu. Cursor ends on last menu line."""
         sys.stdout.write("\n")
-        rendered = render_image(image, columns, border=pola, caption=caption, resample=resample)
+        rendered = render_image(image, columns, border=pola, caption=caption,
+                                resample=_current_resample(), dither=_current_dither())
         sys.stdout.write(rendered)
         sys.stdout.write(f"\n\n{_menu_str()}")
+        sys.stdout.flush()
+
+    def _redraw_menu_only():
+        """Redraw just the menu lines (cursor is on last menu line)."""
+        # Move up to first menu line
+        if menu_lines > 1:
+            sys.stdout.write(f"\033[{menu_lines - 1}A\r")
+        else:
+            sys.stdout.write("\r")
+        for i in range(menu_lines):
+            sys.stdout.write(f"\033[2K")
+            if i < menu_lines - 1:
+                sys.stdout.write("\n")
+        # Now cursor is on last menu line, move back to first
+        if menu_lines > 1:
+            sys.stdout.write(f"\033[{menu_lines - 1}A\r")
+        else:
+            sys.stdout.write("\r")
+        sys.stdout.write(_menu_str())
         sys.stdout.flush()
 
     # First render
@@ -198,27 +249,40 @@ def _generate_and_display(prompt: str, columns: int, size: int,
             if key in ("quit", "enter"):
                 break
 
-            prev = selected
-            if key == "left" and selected > 0:
-                selected -= 1
-            elif key == "right" and selected < len(_FILTERS) - 1:
-                selected += 1
-
-            if selected != prev:
-                # Cursor is on the menu line. Move up to start of block:
-                # menu line + blank line + image lines + blank line = total_lines
-                sys.stdout.write(f"\033[{total_lines - 1}A\r")
-                _draw_all()
+            if key == "up" and active_row > 0:
+                active_row -= 1
+                _redraw_menu_only()
+            elif key == "down" and active_row < len(settings) - 1:
+                active_row += 1
+                _redraw_menu_only()
+            elif key == "left" or key == "right":
+                _, options = settings[active_row]
+                prev = selected[active_row]
+                if key == "left" and selected[active_row] > 0:
+                    selected[active_row] -= 1
+                elif key == "right" and selected[active_row] < len(options) - 1:
+                    selected[active_row] += 1
+                if selected[active_row] != prev:
+                    # Value changed → re-render image + menu
+                    sys.stdout.write(f"\033[{total_lines - 1}A\r")
+                    _draw_all()
     finally:
         sys.stdout.write("\033[?25h\n")
         sys.stdout.flush()
 
-    # Replace filter menu with confirmed choice
-    filter_name, _ = _FILTERS[selected]
-    sys.stdout.write(f"\033[1A\033[2K  {dim}Filter:{reset} {filter_name}\n")
+    # Replace menu with confirmed choices
+    filter_name, _ = _FILTERS[selected[0]]
+    dither_name, _ = _DITHERS[selected[1]]
+    sys.stdout.write(f"\033[{menu_lines}A")
+    for i in range(menu_lines):
+        sys.stdout.write(f"\033[2K\n")
+    sys.stdout.write(f"\033[{menu_lines}A")
+    sys.stdout.write(f"  {dim}Filter:{reset} {filter_name}\n")
+    sys.stdout.write(f"  {dim}Texture:{reset} {dither_name}\n")
     sys.stdout.flush()
 
-    _, final_resample = _FILTERS[selected]
+    final_resample = _current_resample()
+    final_dither = _current_dither()
     gallery = Path.home() / "axon_gallery"
     gallery.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -232,7 +296,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         print(f"  {dim}Original:{reset} {png_path}")
 
         # Save scaled-up 256-color preview
-        preview = render_preview(image, columns, scale=8, resample=final_resample)
+        preview = render_preview(image, columns, scale=8, resample=final_resample, dither=final_dither)
         preview_path = gallery / f"axon_{timestamp}_256.png"
         preview.save(preview_path)
         print(f"  {dim}Preview:{reset}  {preview_path}")
@@ -240,7 +304,8 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     # Export JSON menu
     do_export = _yes_no_menu("Export JSON", default=1)
     if do_export:
-        rendered = render_image(image, columns, border=pola, caption=caption, resample=final_resample)
+        rendered = render_image(image, columns, border=pola, caption=caption,
+                                resample=final_resample, dither=final_dither)
         lines = rendered.split("\n")
         json_data = {
             "width": columns,
