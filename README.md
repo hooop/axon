@@ -2,6 +2,8 @@
 
 CLI tool that generates images from text prompts using Google Gemini and renders them directly in your terminal using ANSI 256 colors and Unicode half block characters.
 
+![Axon](assets/screenshot.png)
+
 ## Features
 
 - Text to image generation via Google Gemini API
