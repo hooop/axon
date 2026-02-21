@@ -67,6 +67,12 @@ _DITHERS = [
     ("Grid", "ordered"),
 ]
 
+_POSTERS = [
+    ("Off", 0),
+    ("Light", 4),
+    ("Heavy", 2),
+]
+
 
 def _scan_palettes():
     """Scan palettes/ folder for LUT PNG files.
@@ -75,15 +81,14 @@ def _scan_palettes():
     """
     palettes = [("None", None)]
     lut_dir = Path(__file__).resolve().parent.parent / "palettes"
-    if not lut_dir.is_dir():
-        return palettes
-    for png in sorted(lut_dir.glob("*.png")):
-        try:
-            remap = load_lut(str(png))
-            name = png.stem.capitalize()
-            palettes.append((name, remap))
-        except Exception:
-            continue
+    if lut_dir.is_dir():
+        for png in sorted(lut_dir.glob("*.png")):
+            try:
+                remap = load_lut(str(png))
+                name = png.stem.capitalize()
+                palettes.append((name, remap))
+            except Exception:
+                continue
     return palettes
 
 
@@ -191,12 +196,13 @@ def _generate_and_display(prompt: str, columns: int, size: int,
 
     palettes = _scan_palettes()
 
-    # Settings state: [filter_index, dither_index, palette_index]
-    selected = [0, 0, 0]
+    # Settings state: [filter_index, dither_index, poster_index, palette_index]
+    selected = [0, 0, 0, 0]
     active_row = 0
     settings = [
         ("Filter", _FILTERS),
         ("Texture", _DITHERS),
+        ("Poster", _POSTERS),
         ("Palette", palettes),
     ]
 
@@ -232,8 +238,12 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         _, dither = _DITHERS[selected[1]]
         return dither
 
+    def _current_poster():
+        _, poster = _POSTERS[selected[2]]
+        return poster
+
     def _current_remap():
-        _, remap = palettes[selected[2]]
+        _, remap = palettes[selected[3]]
         return remap
 
     def _draw_all():
@@ -241,7 +251,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         sys.stdout.write("\n")
         rendered = render_image(image, columns, border=pola, caption=caption,
                                 resample=_current_resample(), dither=_current_dither(),
-                                remap=_current_remap())
+                                remap=_current_remap(), poster=_current_poster())
         sys.stdout.write(rendered)
         sys.stdout.write(f"\n\n{_menu_str()}")
         sys.stdout.flush()
@@ -300,18 +310,21 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     # Replace menu with confirmed choices
     filter_name, _ = _FILTERS[selected[0]]
     dither_name, _ = _DITHERS[selected[1]]
-    palette_name, _ = palettes[selected[2]]
+    poster_name, _ = _POSTERS[selected[2]]
+    palette_name, _ = palettes[selected[3]]
     sys.stdout.write(f"\033[{menu_lines}A")
     for i in range(menu_lines):
         sys.stdout.write(f"\033[2K\n")
     sys.stdout.write(f"\033[{menu_lines}A")
     sys.stdout.write(f"  {dim}Filter:{reset} {filter_name}\n")
     sys.stdout.write(f"  {dim}Texture:{reset} {dither_name}\n")
+    sys.stdout.write(f"  {dim}Poster:{reset} {poster_name}\n")
     sys.stdout.write(f"  {dim}Palette:{reset} {palette_name}\n")
     sys.stdout.flush()
 
     final_resample = _current_resample()
     final_dither = _current_dither()
+    final_poster = _current_poster()
     final_remap = _current_remap()
     gallery = Path.home() / "axon_gallery"
     gallery.mkdir(exist_ok=True)
@@ -326,7 +339,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         print(f"  {dim}Original:{reset} {png_path}")
 
         # Save scaled-up 256-color preview
-        preview = render_preview(image, columns, scale=8, resample=final_resample, dither=final_dither, remap=final_remap)
+        preview = render_preview(image, columns, scale=8, resample=final_resample, dither=final_dither, remap=final_remap, poster=final_poster)
         preview_path = gallery / f"axon_{timestamp}_256.png"
         preview.save(preview_path)
         print(f"  {dim}Preview:{reset}  {preview_path}")
@@ -336,7 +349,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     if do_export:
         rendered = render_image(image, columns, border=pola, caption=caption,
                                 resample=final_resample, dither=final_dither,
-                                remap=final_remap)
+                                remap=final_remap, poster=final_poster)
         lines = rendered.split("\n")
         json_data = {
             "width": columns,

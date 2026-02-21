@@ -70,6 +70,31 @@ def load_lut(path: str) -> list:
     return remap
 
 
+def make_remap(palette_rgb):
+    """Build a 256→256 remap table that restricts output to the given RGB palette.
+
+    palette_rgb: list of (r, g, b) tuples defining the allowed colors.
+    For each ANSI 256 color, finds the nearest palette color, then its nearest ANSI 256 index.
+    """
+    # Pre-compute ANSI index for each palette color
+    palette_idx = [_rgb_to_256(r, g, b) for r, g, b in palette_rgb]
+    # Pre-compute RGB for each palette entry (snapped to ANSI)
+    palette_ansi_rgb = [_idx_to_rgb(idx) for idx in palette_idx]
+
+    remap = [0] * 256
+    for i in range(256):
+        r, g, b = _idx_to_rgb(i)
+        best = 0
+        best_dist = float("inf")
+        for j, (pr, pg, pb) in enumerate(palette_rgb):
+            d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+            if d < best_dist:
+                best_dist = d
+                best = j
+        remap[i] = palette_idx[best]
+    return remap
+
+
 def _apply_remap(idx_grid, remap):
     """Apply a 256→256 remap table to an index grid in place."""
     for y in range(len(idx_grid)):
@@ -86,13 +111,34 @@ _BAYER_4x4 = [
 ]
 
 
-def _build_idx_grid(img: Image.Image, dither: str = "none", remap: Optional[list] = None):
+def _posterize(img: Image.Image, levels: int) -> Image.Image:
+    """Reduce color levels per channel. levels=4 → 4 levels, levels=2 → 2 levels."""
+    factor = 256 // levels
+    pixels = img.load()
+    w, h = img.size
+    out = img.copy()
+    out_pixels = out.load()
+    for y in range(h):
+        for x in range(w):
+            r, g, b = pixels[x, y]
+            out_pixels[x, y] = (
+                (r // factor) * factor + factor // 2,
+                (g // factor) * factor + factor // 2,
+                (b // factor) * factor + factor // 2,
+            )
+    return out
+
+
+def _build_idx_grid(img: Image.Image, dither: str = "none", remap: Optional[list] = None, poster: int = 0):
     """Build a 2D grid of ANSI 256 color indices from a PIL RGB image.
 
     dither: "none", "floyd" (Floyd-Steinberg), or "ordered" (Bayer 4x4).
     remap: optional 256-entry remap table (from load_lut).
+    poster: 0=off, or number of levels per channel (e.g. 4, 2).
     Returns list[list[int]] of shape [height][width].
     """
+    if poster > 0:
+        img = _posterize(img, poster)
     w, h = img.size
     pixels = img.load()
 
@@ -154,7 +200,7 @@ def _build_idx_grid(img: Image.Image, dither: str = "none", remap: Optional[list
     return grid
 
 
-def render_image(image: Image.Image, columns: int, border: bool = False, caption: str = None, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None) -> str:
+def render_image(image: Image.Image, columns: int, border: bool = False, caption: str = None, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None, poster: int = 0) -> str:
     """Render an image as 256-color ANSI text using Unicode half-block characters.
 
     Each character cell encodes two vertical pixels:
@@ -172,7 +218,7 @@ def render_image(image: Image.Image, columns: int, border: bool = False, caption
     if rows % 2 != 0:
         rows += 1
     img = image.convert("RGB").resize((inner, rows), resample)
-    idx_grid = _build_idx_grid(img, dither, remap)
+    idx_grid = _build_idx_grid(img, dither, remap, poster)
 
     white = "\033[48;5;231m"
     reset = "\033[0m"
@@ -221,7 +267,7 @@ def _idx_to_rgb(idx: int):
     return _CUBE_VALUES[i // 36], _CUBE_VALUES[(i % 36) // 6], _CUBE_VALUES[i % 6]
 
 
-def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None) -> Image.Image:
+def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None, poster: int = 0) -> Image.Image:
     """Render a scaled-up preview showing the exact 256-color terminal output.
 
     Returns a PIL Image where each terminal pixel is a (scale x scale) block.
@@ -230,7 +276,7 @@ def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Im
     if rows % 2 != 0:
         rows += 1
     img = image.convert("RGB").resize((columns, rows), resample)
-    idx_grid = _build_idx_grid(img, dither, remap)
+    idx_grid = _build_idx_grid(img, dither, remap, poster)
 
     preview = Image.new("RGB", (columns * scale, rows * scale))
     preview_pixels = preview.load()
