@@ -6,6 +6,8 @@ warnings.filterwarnings("ignore")
 import argparse
 import io
 import json
+import os
+import select
 import sys
 import termios
 import tty
@@ -90,6 +92,18 @@ def _scan_palettes():
             except Exception:
                 continue
     return palettes
+
+
+def _flush_input():
+    """Discard any pending keystrokes in stdin."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while select.select([fd], [], [], 0)[0]:
+            os.read(fd, 1024)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def _read_key():
@@ -255,6 +269,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         sys.stdout.write(rendered)
         sys.stdout.write(f"\n\n{_menu_str()}")
         sys.stdout.flush()
+        _flush_input()
 
     def _redraw_menu_only():
         """Redraw just the menu lines (cursor is on last menu line)."""
@@ -279,6 +294,12 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     sys.stdout.write("\033[?25l")
     _draw_all()
 
+    # Disable echo for the entire interactive loop to prevent ^[[C artifacts
+    fd = sys.stdin.fileno()
+    old_term = termios.tcgetattr(fd)
+    no_echo = termios.tcgetattr(fd)
+    no_echo[3] = no_echo[3] & ~termios.ECHO
+    termios.tcsetattr(fd, termios.TCSADRAIN, no_echo)
     try:
         while True:
             key = _read_key()
@@ -304,6 +325,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
                     sys.stdout.write(f"\033[{total_lines - 1}A\r")
                     _draw_all()
     finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
         sys.stdout.write("\033[?25h\n")
         sys.stdout.flush()
 
