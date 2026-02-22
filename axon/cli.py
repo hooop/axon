@@ -94,6 +94,98 @@ def _scan_palettes():
     return palettes
 
 
+def _prompt_input(columns: int) -> Optional[str]:
+    """Multi-line prompt editor with │ bar on each line.
+
+    Returns the entered text, or None on cancel.
+    """
+    light_brown = "\033[38;5;137m"
+    reset = "\033[0m"
+    bar = f"{light_brown}\u2502{reset} "
+    prefix_len = 4  # "  │ " = 2 spaces + bar + space
+    max_chars = columns - prefix_len
+
+    text = ""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+
+    def _render():
+        # Split text into lines of max_chars width
+        lines = []
+        remaining = text
+        while len(remaining) > max_chars:
+            lines.append(remaining[:max_chars])
+            remaining = remaining[max_chars:]
+        lines.append(remaining)
+
+        # Move up to first line if multi-line
+        if len(lines) > 1:
+            sys.stdout.write(f"\033[{len(lines) - 1}A")
+        # Draw all lines
+        for i, line in enumerate(lines):
+            sys.stdout.write(f"\r\033[2K  {bar}{line}")
+            if i < len(lines) - 1:
+                sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    # Draw initial bar with placeholder, cursor at start
+    placeholder = "Describe what you see..."
+    hint = "\033[38;5;240m"
+    sys.stdout.write(f"  {bar}{hint}{placeholder}{reset}")
+    sys.stdout.write(f"\033[{len(placeholder)}D")
+    sys.stdout.flush()
+
+    try:
+        tty.setraw(fd)
+        prev_line_count = 1
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ("\r", "\n"):
+                # Count final lines for cursor positioning
+                line_count = max(1, (len(text) + max_chars - 1) // max_chars) if text else 1
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return text.strip() if text.strip() else None
+            if ch == "\x03":  # Ctrl-C
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return None
+            if ch == "\x7f" or ch == "\x08":  # Backspace
+                if text:
+                    old_line_count = max(1, (len(text) + max_chars - 1) // max_chars) if text else 1
+                    text = text[:-1]
+                    new_line_count = max(1, (len(text) + max_chars - 1) // max_chars) if text else 1
+                    # Clear extra line if we went from N to N-1 lines
+                    if new_line_count < old_line_count:
+                        sys.stdout.write(f"\r\033[2K\033[1A")
+                    if text:
+                        _render()
+                    else:
+                        sys.stdout.write(f"\r\033[2K  {bar}{hint}{placeholder}{reset}")
+                        sys.stdout.write(f"\033[{len(placeholder)}D")
+                        sys.stdout.flush()
+                    prev_line_count = new_line_count
+                continue
+            if ch == "\x1b":  # Skip escape sequences
+                sys.stdin.read(1)
+                sys.stdin.read(1)
+                continue
+            if ord(ch) < 32:  # Skip other control chars
+                continue
+            text += ch
+            line_count = max(1, (len(text) + max_chars - 1) // max_chars)
+            if line_count > prev_line_count:
+                sys.stdout.write("\n")
+            _render()
+            prev_line_count = line_count
+    except (EOFError, KeyboardInterrupt):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return None
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
 def _flush_input():
     """Discard any pending keystrokes in stdin."""
     fd = sys.stdin.fileno()
@@ -393,6 +485,10 @@ def _interactive() -> None:
     dim = "\033[38;5;238m"
     reset = "\033[0m"
 
+    # White cursor for the whole session
+    sys.stdout.write("\033]12;#ffffff\007")
+    sys.stdout.flush()
+
     # Clear screen and animate logo
     print("\033[2J\033[H", end="", flush=True)
   
@@ -429,18 +525,36 @@ def _interactive() -> None:
         print(f"\033[1A\033[2K  {dim}Caption:{reset} {display_caption}", flush=True)
 
     print()
-    print(f"  {light_brown}>{reset} ", end="", flush=True)
-    try:
-        prompt = input().strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
+    prompt = _prompt_input(columns)
 
     if not prompt:
         print("  No prompt given.")
+        sys.stdout.write("\033]112\007")
+        sys.stdout.flush()
         return
 
+    # Replace prompt with dim version
+    prompt_lines = []
+    remaining = prompt
+    max_chars = columns - 4
+    while len(remaining) > max_chars:
+        prompt_lines.append(remaining[:max_chars])
+        remaining = remaining[max_chars:]
+    prompt_lines.append(remaining)
+    line_count = len(prompt_lines)
+    sys.stdout.write(f"\033[{line_count}A")
+    for i, line in enumerate(prompt_lines):
+        sys.stdout.write(f"\r\033[2K  {dim}\u2502{reset} {dim}{line}{reset}")
+        if i < line_count - 1:
+            sys.stdout.write("\n")
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
     _generate_and_display(prompt, render_width, 768, pola, caption)
+
+    # Reset cursor color
+    sys.stdout.write("\033]112\007")
+    sys.stdout.flush()
 
 
 def main() -> None:
