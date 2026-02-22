@@ -2,7 +2,7 @@
 
 CLI tool that generates images from text prompts using Google Gemini and renders them directly in your terminal using ANSI 256 colors and Unicode half block characters.
 
-<img src="assets/screen2.png" width="600"> 
+<img src="assets/screen2.png" width="700"> 
 
 ## Features
 
