@@ -446,22 +446,108 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     gallery.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
 
-    # Save menu
-    do_save = _yes_no_menu("Save", default=0)
+    # Export menu
+    _YES_NO = [("Yes", True), ("No", False)]
+    export_settings = [
+        ("Save", _YES_NO),
+        ("Export", _YES_NO),
+    ]
+    export_selected = [0, 1]  # Save=Yes, Export=No
+    export_active = 0
+    export_max_label = max(len(l) for l, _ in export_settings)
+
+    def _export_menu_str():
+        lines = []
+        for row, (label, options) in enumerate(export_settings):
+            active = row == export_active
+            padded = label.ljust(export_max_label)
+            parts = []
+            for i, (name, _) in enumerate(options):
+                if i == export_selected[row]:
+                    if active:
+                        parts.append(f"{white}{name}{reset}")
+                    else:
+                        parts.append(f"{soft}{name}{reset}")
+                else:
+                    parts.append(f"{dim}{name}{reset}")
+            if active:
+                lines.append(f"  {light_brown}{padded}:{reset}  " + "  ".join(parts))
+            else:
+                lines.append(f"  {dim}{padded}:{reset}  " + "  ".join(parts))
+        return "\n".join(lines)
+
+    export_menu_lines = len(export_settings)
+    sys.stdout.write("\033[?25l")
+    sys.stdout.write(_export_menu_str())
+    sys.stdout.flush()
+
+    fd = sys.stdin.fileno()
+    old_term = termios.tcgetattr(fd)
+    no_echo = termios.tcgetattr(fd)
+    no_echo[3] = no_echo[3] & ~termios.ECHO
+    termios.tcsetattr(fd, termios.TCSADRAIN, no_echo)
+    try:
+        while True:
+            key = _read_key()
+            if key in ("quit", "enter"):
+                break
+            if key == "up" and export_active > 0:
+                export_active -= 1
+            elif key == "down" and export_active < export_menu_lines - 1:
+                export_active += 1
+            elif key == "left" and export_selected[export_active] > 0:
+                export_selected[export_active] -= 1
+            elif key == "right" and export_selected[export_active] < 1:
+                export_selected[export_active] += 1
+            # Redraw menu
+            if export_menu_lines > 1:
+                sys.stdout.write(f"\033[{export_menu_lines - 1}A\r")
+            else:
+                sys.stdout.write("\r")
+            for i in range(export_menu_lines):
+                sys.stdout.write(f"\033[2K")
+                if i < export_menu_lines - 1:
+                    sys.stdout.write("\n")
+            if export_menu_lines > 1:
+                sys.stdout.write(f"\033[{export_menu_lines - 1}A\r")
+            else:
+                sys.stdout.write("\r")
+            sys.stdout.write(_export_menu_str())
+            sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
+        sys.stdout.write("\033[?25h\n")
+        sys.stdout.flush()
+
+    # Single-line summary — go back up over menu lines + blank line from settings summary
+    export_summary = []
+    for row, (label, options) in enumerate(export_settings):
+        name, _ = options[export_selected[row]]
+        export_summary.append(f"{dim}{label}:{reset} {white}{name}{reset}")
+    up = export_menu_lines + 1  # +1 for the blank line between settings summary and export menu
+    sys.stdout.write(f"\033[{up}A")
+    for i in range(up):
+        sys.stdout.write(f"\033[2K\n")
+    sys.stdout.write(f"\033[{up}A")
+    sys.stdout.write(f"  {'  '.join(export_summary)}\n")
+    sys.stdout.flush()
+
+    _, do_save = _YES_NO[export_selected[0]]
+    _, do_export = _YES_NO[export_selected[1]]
+
+    if do_save or do_export:
+        print()
+
     if do_save:
-        # Save original Gemini image
         png_path = gallery / f"axon_{timestamp}.png"
         png_path.write_bytes(image_bytes)
-        print(f"  {dim}Original:{reset} {png_path}")
+        print(f"  {dim}{'Original'.ljust(8)}:{reset}  {png_path}")
 
-        # Save scaled-up 256-color preview
         preview = render_preview(image, columns, scale=8, resample=final_resample, dither=final_dither, remap=final_remap, poster=final_poster)
         preview_path = gallery / f"axon_{timestamp}_256.png"
         preview.save(preview_path)
-        print(f"  {dim}Preview:{reset}  {preview_path}")
+        print(f"  {dim}{'Render'.ljust(8)}:{reset}  {preview_path}")
 
-    # Export JSON menu
-    do_export = _yes_no_menu("Export JSON", default=1)
     if do_export:
         rendered = render_image(image, columns, border=pola, caption=caption,
                                 resample=final_resample, dither=final_dither,
@@ -474,7 +560,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         }
         json_path = gallery / f"axon_{timestamp}.json"
         json_path.write_text(json.dumps(json_data, ensure_ascii=False))
-        print(f"  {dim}Export:{reset}   {json_path}")
+        print(f"  {dim}{'JSON'.ljust(8)}:{reset}  {json_path}")
 
     print()
 
