@@ -317,23 +317,28 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     menu_lines = len(settings)
     total_lines = 1 + img_lines + 1 + menu_lines
 
+    # Align labels on the longest one
+    max_label = max(len(label) for label, _ in settings)
+    soft = "\033[38;5;250m"
+
     def _menu_str():
         lines = []
         for row, (label, options) in enumerate(settings):
             active = row == active_row
+            padded = label.ljust(max_label)
             parts = []
             for i, (name, _) in enumerate(options):
                 if i == selected[row]:
                     if active:
-                        parts.append(f"{light_brown}>{white} {name}{reset}")
+                        parts.append(f"{white}{name}{reset}")
                     else:
-                        parts.append(f"{dim}> {name}{reset}")
+                        parts.append(f"{soft}{name}{reset}")
                 else:
-                    parts.append(f"  {dim}{name}{reset}")
+                    parts.append(f"{dim}{name}{reset}")
             if active:
-                lines.append(f"  {light_brown}{label}:{reset}  " + "  ".join(parts))
+                lines.append(f"  {light_brown}{padded}:{reset}  " + "  ".join(parts))
             else:
-                lines.append(f"  {dim}{label}:{reset}  " + "  ".join(parts))
+                lines.append(f"  {dim}{padded}:{reset}  " + "  ".join(parts))
         return "\n".join(lines)
 
     def _current_resample():
@@ -421,19 +426,16 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         sys.stdout.write("\033[?25h\n")
         sys.stdout.flush()
 
-    # Replace menu with confirmed choices
-    filter_name, _ = _FILTERS[selected[0]]
-    dither_name, _ = _DITHERS[selected[1]]
-    poster_name, _ = _POSTERS[selected[2]]
-    palette_name, _ = palettes[selected[3]]
+    # Replace menu with single-line summary
+    summary_parts = []
+    for row, (label, options) in enumerate(settings):
+        name, _ = options[selected[row]]
+        summary_parts.append(f"{dim}{label}:{reset} {white}{name}{reset}")
     sys.stdout.write(f"\033[{menu_lines}A")
     for i in range(menu_lines):
         sys.stdout.write(f"\033[2K\n")
     sys.stdout.write(f"\033[{menu_lines}A")
-    sys.stdout.write(f"  {dim}Filter:{reset} {filter_name}\n")
-    sys.stdout.write(f"  {dim}Texture:{reset} {dither_name}\n")
-    sys.stdout.write(f"  {dim}Poster:{reset} {poster_name}\n")
-    sys.stdout.write(f"  {dim}Palette:{reset} {palette_name}\n")
+    sys.stdout.write(f"  {'  '.join(summary_parts)}\n\n")
     sys.stdout.flush()
 
     final_resample = _current_resample()
