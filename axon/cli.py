@@ -129,8 +129,8 @@ def _prompt_input(columns: int) -> Optional[str]:
         sys.stdout.flush()
 
     # Draw initial bar with placeholder, cursor at start
-    placeholder = "Describe what you see..."
-    hint = "\033[38;5;240m"
+    placeholder = "Describe what you see"
+    hint = "\033[38;5;238m"
     sys.stdout.write(f"  {bar}{hint}{placeholder}{reset}")
     sys.stdout.write(f"\033[{len(placeholder)}D")
     sys.stdout.flush()
