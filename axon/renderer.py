@@ -1,5 +1,6 @@
 """Convert a PIL Image to a half-block ANSI string for terminal display (256 colors)."""
 
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -13,40 +14,98 @@ _CUBE_VALUES = (0, 95, 135, 175, 215, 255)
 _GRAY_VALUES = tuple(8 + 10 * i for i in range(24))
 
 
+# ---------------------------------------------------------------------------
+# RGB → CIE-Lab conversion (pure Python, no numpy)
+# ---------------------------------------------------------------------------
+
+def _srgb_to_linear(c):
+    """Convert sRGB 0-255 to linear 0-1."""
+    c /= 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _rgb_to_lab(r, g, b):
+    """Convert sRGB (0-255) to CIE-Lab."""
+    # linearize
+    lr = _srgb_to_linear(r)
+    lg = _srgb_to_linear(g)
+    lb = _srgb_to_linear(b)
+    # RGB to XYZ (D65)
+    x = lr * 0.4124564 + lg * 0.3575761 + lb * 0.1804375
+    y = lr * 0.2126729 + lg * 0.7151522 + lb * 0.0721750
+    z = lr * 0.0193339 + lg * 0.1191920 + lb * 0.9503041
+    # normalize to D65 white point
+    x /= 0.95047
+    z /= 1.08883
+    # XYZ to Lab
+    def f(t):
+        return t ** (1/3) if t > 0.008856 else 7.787 * t + 16/116
+    fx, fy, fz = f(x), f(y), f(z)
+    L = 116.0 * fy - 16.0
+    a = 500.0 * (fx - fy)
+    b_val = 200.0 * (fy - fz)
+    return L, a, b_val
+
+
+def _idx_to_rgb(idx: int):
+    """Convert an ANSI 256 index back to RGB."""
+    if idx >= 232:
+        gv = _GRAY_VALUES[idx - 232]
+        return gv, gv, gv
+    i = idx - 16
+    return _CUBE_VALUES[i // 36], _CUBE_VALUES[(i % 36) // 6], _CUBE_VALUES[i % 6]
+
+
+# Pre-compute Lab values for ANSI colors 16-255
+_PALETTE_LAB = []
+for _i in range(16, 256):
+    _PALETTE_LAB.append(_rgb_to_lab(*_idx_to_rgb(_i)))
+_PALETTE_LAB = tuple(_PALETTE_LAB)
+
+
+# Flatten palette Lab into separate L, a, b lists for faster iteration
+_PAL_L = tuple(lab[0] for lab in _PALETTE_LAB)
+_PAL_A = tuple(lab[1] for lab in _PALETTE_LAB)
+_PAL_B = tuple(lab[2] for lab in _PALETTE_LAB)
+_PAL_COUNT = len(_PALETTE_LAB)
+
+
+def _lab_nearest(L, a, b_val):
+    """Find the closest ANSI 256 index (16-255) for a Lab color."""
+    best = 0
+    best_dist = float("inf")
+    pal_l, pal_a, pal_b = _PAL_L, _PAL_A, _PAL_B
+    for i in range(_PAL_COUNT):
+        dL = L - pal_l[i]
+        da = a - pal_a[i]
+        db = b_val - pal_b[i]
+        d = dL * dL + da * da + db * db
+        if d < best_dist:
+            best_dist = d
+            best = i
+    return best + 16
+
+
+# Pre-compute RGB→ANSI256 lookup table using Lab matching.
+# Sampled every _LUT_STEP values per channel, then looked up at render time.
+_LUT_STEP = 8
+_LUT_SIZE = 256 // _LUT_STEP  # 32
+
+_RGB_TO_256_LUT = [[[0] * _LUT_SIZE for _ in range(_LUT_SIZE)] for _ in range(_LUT_SIZE)]
+for _ri in range(_LUT_SIZE):
+    for _gi in range(_LUT_SIZE):
+        for _bi in range(_LUT_SIZE):
+            _L, _a, _bv = _rgb_to_lab(
+                min(_ri * _LUT_STEP, 255),
+                min(_gi * _LUT_STEP, 255),
+                min(_bi * _LUT_STEP, 255),
+            )
+            _RGB_TO_256_LUT[_ri][_gi][_bi] = _lab_nearest(_L, _a, _bv)
+
+
 def _rgb_to_256(r: int, g: int, b: int) -> int:
-    """Map an RGB value to the closest ANSI 256-color index."""
-    # Find best match in the 6x6x6 color cube
-    def _closest_cube(v: int) -> int:
-        best = 0
-        for i, cv in enumerate(_CUBE_VALUES):
-            if abs(v - cv) < abs(v - _CUBE_VALUES[best]):
-                best = i
-        return best
-
-    ri, gi, bi = _closest_cube(r), _closest_cube(g), _closest_cube(b)
-    cube_index = 16 + 36 * ri + 6 * gi + bi
-    cube_dist = (
-        (r - _CUBE_VALUES[ri]) ** 2
-        + (g - _CUBE_VALUES[gi]) ** 2
-        + (b - _CUBE_VALUES[bi]) ** 2
-    )
-
-    # Check if a grayscale shade is closer
-    gray = round((r + g + b) / 3)
-    best_gray_i = 0
-    best_gray_dist = abs(gray - _GRAY_VALUES[0])
-    for i, gv in enumerate(_GRAY_VALUES):
-        d = abs(gray - gv)
-        if d < best_gray_dist:
-            best_gray_dist = d
-            best_gray_i = i
-
-    gv = _GRAY_VALUES[best_gray_i]
-    gray_dist = (r - gv) ** 2 + (g - gv) ** 2 + (b - gv) ** 2
-
-    if gray_dist < cube_dist:
-        return 232 + best_gray_i
-    return cube_index
+    """Map an RGB value to the closest ANSI 256-color index (Lab-based LUT)."""
+    return _RGB_TO_256_LUT[r // _LUT_STEP][g // _LUT_STEP][b // _LUT_STEP]
 
 
 def load_lut(path: str) -> list:
@@ -256,15 +315,6 @@ def render_image(image: Image.Image, columns: int, border: bool = False, caption
                 lines.append(white + border_char * columns + reset)
 
     return "\n".join(lines)
-
-
-def _idx_to_rgb(idx: int):
-    """Convert an ANSI 256 index back to RGB."""
-    if idx >= 232:
-        gv = _GRAY_VALUES[idx - 232]
-        return gv, gv, gv
-    i = idx - 16
-    return _CUBE_VALUES[i // 36], _CUBE_VALUES[(i % 36) // 6], _CUBE_VALUES[i % 6]
 
 
 def render_preview(image: Image.Image, columns: int, scale: int = 8, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None, poster: int = 0) -> Image.Image:

@@ -76,6 +76,7 @@ _POSTERS = [
 ]
 
 
+
 def _scan_palettes():
     """Scan palettes/ folder for LUT PNG files.
 
@@ -302,7 +303,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
 
     palettes = _scan_palettes()
 
-    # Settings state: [filter_index, dither_index, poster_index, palette_index]
+    # Settings state: [filter, dither, poster, palette]
     selected = [0, 0, 0, 0]
     active_row = 0
     settings = [
