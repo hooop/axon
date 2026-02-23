@@ -23,7 +23,7 @@ CLI tool that generates images from text prompts using Google Gemini and renders
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/axon.git
+git clone git@github.com:hooop/axon.git
 cd axon
 pip install -e .
 ```
@@ -47,7 +47,7 @@ Launches the full interface: animated logo, configuration prompts (size, polaroi
 ### Direct mode
 
 ```bash
-axon "a cat sitting on a rooftop at sunset"
+axon "a picnic on the grass, impressionist style, pixel art"
 ```
 
 Options:
