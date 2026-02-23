@@ -45,6 +45,8 @@ axon
 
 Launches the full interface: animated logo, configuration prompts (size, polaroid border), then a text prompt. After generation, navigate the settings menu with arrow keys to adjust the rendering in real time.
 
+> Tip: Adding "pixel art" to your prompt produces images that render best in terminal.
+
 ### Direct mode
 
 ```bash
@@ -59,6 +61,7 @@ Options:
 --pola        Add a polaroid-style white border
 --caption TXT Caption text on the polaroid border
 ```
+
 
 ## Settings menu
 
