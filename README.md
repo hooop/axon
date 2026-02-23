@@ -16,6 +16,7 @@ CLI tool that generates images from text prompts using Google Gemini and renders
 
 ## Requirements
 
+- macOS or Linux
 - Python 3.9+
 - A terminal with 256-color support
 - A Google Gemini API key ([get one here](https://aistudio.google.com/apikey))
