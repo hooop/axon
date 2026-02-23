@@ -75,6 +75,11 @@ _POSTERS = [
     ("Heavy", 2),
 ]
 
+_GLYPHS = [
+    ("Block", "\u2580"),
+    ("Shade", "\u2591"),
+]
+
 
 
 def _scan_palettes():
@@ -303,13 +308,14 @@ def _generate_and_display(prompt: str, columns: int, size: int,
 
     palettes = _scan_palettes()
 
-    # Settings state: [filter, dither, poster, palette]
-    selected = [0, 0, 0, 0]
+    # Settings state: [filter, dither, poster, glyph, palette]
+    selected = [0, 0, 0, 0, 0]
     active_row = 0
     settings = [
         ("Filter", _FILTERS),
         ("Texture", _DITHERS),
         ("Poster", _POSTERS),
+        ("Glyph", _GLYPHS),
         ("Palette", palettes),
     ]
 
@@ -354,8 +360,12 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         _, poster = _POSTERS[selected[2]]
         return poster
 
+    def _current_glyph():
+        _, glyph = _GLYPHS[selected[3]]
+        return glyph
+
     def _current_remap():
-        _, remap = palettes[selected[3]]
+        _, remap = palettes[selected[4]]
         return remap
 
     def _draw_all():
@@ -363,7 +373,8 @@ def _generate_and_display(prompt: str, columns: int, size: int,
         sys.stdout.write("\n")
         rendered = render_image(image, columns, border=pola, caption=caption,
                                 resample=_current_resample(), dither=_current_dither(),
-                                remap=_current_remap(), poster=_current_poster())
+                                remap=_current_remap(), poster=_current_poster(),
+                                glyph=_current_glyph())
         sys.stdout.write(rendered)
         sys.stdout.write(f"\n\n{_menu_str()}")
         sys.stdout.flush()
@@ -442,6 +453,7 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     final_resample = _current_resample()
     final_dither = _current_dither()
     final_poster = _current_poster()
+    final_glyph = _current_glyph()
     final_remap = _current_remap()
     gallery = Path.home() / "axon_gallery"
     gallery.mkdir(exist_ok=True)
@@ -552,7 +564,8 @@ def _generate_and_display(prompt: str, columns: int, size: int,
     if do_export:
         rendered = render_image(image, columns, border=pola, caption=caption,
                                 resample=final_resample, dither=final_dither,
-                                remap=final_remap, poster=final_poster)
+                                remap=final_remap, poster=final_poster,
+                                glyph=final_glyph)
         lines = rendered.split("\n")
         json_data = {
             "width": columns,

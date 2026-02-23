@@ -259,7 +259,7 @@ def _build_idx_grid(img: Image.Image, dither: str = "none", remap: Optional[list
     return grid
 
 
-def render_image(image: Image.Image, columns: int, border: bool = False, caption: str = None, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None, poster: int = 0) -> str:
+def render_image(image: Image.Image, columns: int, border: bool = False, caption: str = None, resample=Image.LANCZOS, dither: str = "none", remap: Optional[list] = None, poster: int = 0, glyph: str = "\u2580") -> str:
     """Render an image as 256-color ANSI text using Unicode half-block characters.
 
     Each character cell encodes two vertical pixels:
@@ -295,7 +295,7 @@ def render_image(image: Image.Image, columns: int, border: bool = False, caption
         for x in range(inner):
             fg = idx_grid[y][x]
             bg = idx_grid[y + 1][x]
-            parts.append(f"\033[38;5;{fg};48;5;{bg}m\u2580")
+            parts.append(f"\033[38;5;{fg};48;5;{bg}m{glyph}")
         if border:
             parts.append(white + border_char * pad)
         lines.append("".join(parts) + reset)
